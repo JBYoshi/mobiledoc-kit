@@ -677,7 +677,7 @@ test('delete with option (Mac) or control (Win)  key deletes full word', (assert
   }
 
   Helpers.wait(() => {
-    Helpers.dom.triggerDelete(editor, DIRECTION.BACKWARD, {altKey, ctrlKey});
+    Helpers.dom.triggerDelete(editor, DIRECTION.BACKWARD, {altKey, ctrlKey, inputType: "deleteWordBackward"});
 
     Helpers.wait(() => {
       assert.postIsSimilar(editor.post, expected);

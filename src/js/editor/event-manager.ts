@@ -5,6 +5,7 @@ import Key from '../utils/key'
 import TextInputHandler, { TextInputHandlerListener } from '../editor/text-input-handler'
 import SelectionManager from '../editor/selection-manager'
 import Browser from '../utils/browser'
+import { Position, Range } from '../utils/cursor'
 import Editor, { TextUnit, Format } from './editor'
 import { Logger } from '../utils/log-manager'
 import { PartialSelection } from '../utils/selection-utils'
@@ -19,12 +20,18 @@ const ELEMENT_EVENT_TYPES = <const>[
   'drop',
   'compositionstart',
   'compositionend',
+  'beforeinput',
 ]
 
 declare global {
   interface HTMLElementEventMap {
     compositionstart: CompositionEvent
     compositionend: CompositionEvent
+    beforeinput: InputEvent
+  }
+  interface InputEvent {
+    getTargetRanges(): StaticRange[]
+    dataTransfer: DataTransfer | null
   }
 }
 
@@ -39,7 +46,7 @@ interface ModifierKeys {
 type EventManagerListener = [
   HTMLElement,
   DOMEventType,
-  (event: CompositionEvent | KeyboardEvent | ClipboardEvent | DragEvent) => void
+  (event: CompositionEvent | KeyboardEvent | ClipboardEvent | DragEvent | InputEvent) => void
 ]
 
 export default class EventManager {
@@ -176,26 +183,28 @@ export default class EventManager {
   }
 
   keypress(event: KeyboardEvent) {
-    let { editor, _textInputHandler } = this
-    if (!editor.hasCursor()) {
-      return
-    }
+    if (!InputEvent.prototype.getTargetRanges) {
+      let { editor, _textInputHandler } = this
+      if (!editor.hasCursor()) {
+        return
+      }
 
-    let key = Key.fromEvent(event)
-    if (!key.isPrintable()) {
-      return
-    } else {
-      event.preventDefault()
-    }
+      let key = Key.fromEvent(event)
+      if (!key.isPrintable()) {
+        return
+      } else {
+        event.preventDefault()
+      }
 
-    // Handle carriage returns
-    if (!key.isEnter() && key.keyCode === 13) {
-      _textInputHandler.handleNewLine()
-      editor.handleNewline(event)
-      return
-    }
+      // Handle carriage returns
+      if (!key.isEnter() && key.keyCode === 13) {
+        _textInputHandler.handleNewLine()
+        editor.handleNewline(event)
+        return
+      }
 
-    _textInputHandler.handle(key.toString())
+      _textInputHandler.handle(key.toString())
+    }
   }
 
   keydown(event: KeyboardEvent) {
@@ -239,20 +248,24 @@ export default class EventManager {
         break
       }
       case key.isDelete(): {
-        let { direction } = key
-        let unit = TextUnit.CHAR
-        if (key.altKey && Browser.isMac()) {
-          unit = TextUnit.WORD
-        } else if (key.ctrlKey && !Browser.isMac()) {
-          unit = TextUnit.WORD
+        if (!InputEvent.prototype.getTargetRanges) {
+          let { direction } = key
+          let unit = TextUnit.CHAR
+          if (key.altKey && Browser.isMac()) {
+            unit = TextUnit.WORD
+          } else if (key.ctrlKey && !Browser.isMac()) {
+            unit = TextUnit.WORD
+          }
+          editor.performDelete({ direction, unit })
+          event.preventDefault()
         }
-        editor.performDelete({ direction, unit })
-        event.preventDefault()
         break
       }
       case key.isEnter():
-        this._textInputHandler.handleNewLine()
-        editor.handleNewline(event)
+        if (!InputEvent.prototype.getTargetRanges) {
+          this._textInputHandler.handleNewLine()
+          editor.handleNewline(event)
+        }
         break
       case key.isTab():
         // Handle tab here because it does not fire a `keypress` event
@@ -269,6 +282,77 @@ export default class EventManager {
     }
     let key = Key.fromEvent(event)
     this._updateModifiersFromKey(key, { isDown: false })
+  }
+
+  beforeinput(event: InputEvent) {
+    let { editor } = this
+    if (!editor.hasCursor()) {
+      return
+    }
+
+    // See compatibility data on https://developer.mozilla.org/en-US/docs/Web/API/InputEvent/inputType
+    // Chrome 60, Safari 10.1, Firefox 66; no IE or pre-Chromium Edge
+
+    if (!editor.isEditable) {
+      return
+    }
+
+    if (editor.post.isBlank) {
+      editor._insertEmptyMarkupSectionAtCursor()
+    }
+
+    let jsRange = event.getTargetRanges()[0]
+    if (jsRange) {
+      let range = new Range(
+        Position.fromNode(editor._renderTree, jsRange.startContainer, jsRange.startOffset),
+        Position.fromNode(editor._renderTree, jsRange.endContainer, jsRange.endOffset)
+      )
+      editor.selectRange(range)
+    }
+
+    if (event.inputType.includes('Composition')) {
+      // IME - handled differently
+      return
+    }
+
+    // Safari iOS puts insertReplacementText data in event.dataTransfer.
+    let insertData: string | null = event.data || event.dataTransfer?.getData('text/plain') || null
+
+    // Cut/paste/drop is handled by those events instead
+    switch (event.inputType) {
+      case 'deleteWordBackward':
+        editor.performDelete({ direction: -1, unit: TextUnit.WORD })
+        event.preventDefault()
+        return
+      case 'deleteWordForward':
+        editor.performDelete({ direction: 1, unit: TextUnit.WORD })
+        event.preventDefault()
+        return
+      case 'deleteContent':
+        editor.performDelete()
+        event.preventDefault()
+        return
+      case 'deleteContentBackward':
+        editor.performDelete({ direction: -1, unit: TextUnit.CHAR })
+        event.preventDefault()
+        return
+      case 'deleteContentForward':
+        editor.performDelete({ direction: 1, unit: TextUnit.CHAR })
+        event.preventDefault()
+        return
+      case 'insertLineBreak':
+      case 'insertParagraph':
+        this._textInputHandler.handleNewLine()
+        editor.handleNewline(event)
+        event.preventDefault()
+        break
+      case 'insertText':
+      case 'insertReplacementText':
+      case 'insertFromYank':
+        this._textInputHandler.handle(insertData || '')
+        event.preventDefault()
+        break
+    }
   }
 
   // The mutation handler interferes with IMEs when composing

@@ -175,6 +175,17 @@ function triggerDelete(editor: Editor, direction = DIRECTION.BACKWARD, options =
   let eventOptions = merge({ keyCode }, options)
   let event = createMockEvent('keydown', editor.element, eventOptions)
   _triggerEditorEvent(editor, event)
+  if (InputEvent.prototype.getTargetRanges !== undefined) {
+    const inputType = direction === DIRECTION.BACKWARD ? "deleteContentBackward" : "deleteContentForward"
+    let beforeInputOptions = merge({
+      inputType,
+      getTargetRanges: function() {
+        return []
+      }
+    }, options)
+    let beforeinput = createMockEvent('beforeinput', editor.element, beforeInputOptions)
+    _triggerEditorEvent(editor, beforeinput)
+  }
 }
 
 function triggerForwardDelete(editor: Editor, options: Dict<unknown>) {
@@ -183,8 +194,7 @@ function triggerForwardDelete(editor: Editor, options: Dict<unknown>) {
 
 function triggerEnter(editor: Editor) {
   assertEditor(editor)
-  let event = createMockEvent('keydown', editor.element, { keyCode: KEY_CODES.ENTER })
-  _triggerEditorEvent(editor, event)
+  insertText(editor, "\n")
 }
 
 // keyCodes and charCodes are similar but not the same.
@@ -235,6 +245,32 @@ function insertText(editor: Editor, string: string) {
     _triggerEditorEvent(editor, keypress)
     if (stop) {
       return
+    }
+    if (InputEvent.prototype.getTargetRanges !== undefined) {
+      let inputType = 'insertText'
+      if (letter === '\n') {
+        inputType = 'insertLineBreak'
+      }
+      let beforeinput = createMockEvent('beforeinput', editor.element, {
+        inputType,
+        preventDefault,
+        data: letter,
+        getTargetRanges: function() {
+          return []
+        }
+      })
+      let inputEvent = createMockEvent('input', editor.element, {
+        inputType,
+        data: letter,
+        getTargetRanges: function() {
+          return []
+        }
+      })
+      _triggerEditorEvent(editor, beforeinput)
+      if (stop) {
+        return
+      }
+      _triggerEditorEvent(editor, inputEvent)
     }
     _triggerEditorEvent(editor, keyup)
   })

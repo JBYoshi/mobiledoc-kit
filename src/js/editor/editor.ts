@@ -480,7 +480,7 @@ export default class Editor implements EditorOptions {
     this.runCallbacks(CALLBACK_QUEUES.DID_DELETE, [range, direction, unit])
   }
 
-  handleNewline(event: KeyboardEvent) {
+  handleNewline(event: Event) {
     if (!this.hasCursor()) {
       return
     }
