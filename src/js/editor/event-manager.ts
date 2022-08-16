@@ -184,18 +184,15 @@ export default class EventManager {
     let key = Key.fromEvent(event)
     if (!key.isPrintable()) {
       return
-    } else {
-      event.preventDefault()
     }
 
     // Handle carriage returns
     if (!key.isEnter() && key.keyCode === 13) {
+      event.preventDefault()
       _textInputHandler.handleNewLine()
       editor.handleNewline(event)
       return
     }
-
-    _textInputHandler.handle(key.toString())
   }
 
   keydown(event: KeyboardEvent) {
